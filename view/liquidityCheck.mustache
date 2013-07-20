@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+		<title>Liquidity Check</title>
+		<link rel="shortcut icon" type="image/png" href="/favicon.ico" />
+		<link rel="stylesheet" type="text/css" href="/assets/common.css" />
+	</head>
+
+	<body>
+		<h1><a href="//rippleunion.com"><img src="/assets/logo.png" alt="Ripple Union" /></a> Liquidity Check</h1>
+
+		{{#err}}
+			<p class="error">{{err}}</p>
+		{{/err}}
+
+		{{#from}}
+			<section>
+				<h1>Liquidity options from {{from}} to {{to}}:</h1>
+
+				<ul>
+				{{#alts}}
+					<li>{{alt}}</li>
+				{{/alts}}
+				</ul>
+
+				{{^alts}}
+					No liquidity found.
+				{{/alts}}
+			</section>
+		{{/from}}
+
+		<form method="get" action="">
+			<label>From: <input type="text" name="from" /></label>
+			<label>To: <input type="text" name="to" /></label>
+			<label>Amount: <input type="number" name="amount" /></label>
+			<label>Currency: <input type="text" name="currency" /></label>
+			<input type="submit" value="Check" /></label>
+		</form>
+	</body>
+</html>
