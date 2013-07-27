@@ -1,4 +1,3 @@
-{-# OPTIONS_GHC -fno-warn-orphans #-}
 {-# LANGUAGE CPP #-}
 module Application (liquidityCheck) where
 
@@ -8,7 +7,8 @@ import Control.Applicative (many)
 import Network.Wai (Request(..), Response(..), Application)
 import Network.HTTP.Types (ok200, badRequest400, Status, ResponseHeaders, Query)
 import Network.Wai.Util (stringHeaders)
-import Control.Error (hush, assertZ, MaybeT(..), maybeT, hoistMaybe)
+import Control.Concurrent.STM.TMVar (TMVar)
+import Control.Error (hush, MaybeT(..), maybeT, hoistMaybe)
 import Network.URI (URI(..))
 import Text.Digestive
 import qualified Data.Attoparsec.Text as Attoparsec
@@ -93,19 +93,17 @@ renderPathFindForm view = PathFindForm {
 		currencyErr = map ErrorMessage $ errors (T.pack "currency") view
 	}
 
-liquidityCheck :: URI -> (PC.Input PathFindRequest, PC.Output (Either RippleError PathFindResponse)) -> Application
-liquidityCheck _ (sendWS, recvWS) req
+liquidityCheck :: URI -> (PC.Input (PathFindRequest, TMVar (Either RippleError PathFindResponse))) -> Application
+liquidityCheck _ ws req
 	| null (queryString req) = do
 		form <- getForm T.empty pathFindForm
 		return $ responseTextBuilder ok200 headers (viewLiquidityCheck htmlEscape $ Liquidity { alts = [], pfForm = [renderPathFindForm form] })
 	| otherwise = do
-		-- TODO: websocket reconnect logic
 		(view, pathfind) <- postForm T.empty pathFindForm (\(_:x) -> queryFormEnv (queryString req) x)
 
 		alts <- liftIO $ maybeT (return []) return $ do
 			pf <- hoistMaybe pathfind
-			assertZ =<< liftIO (PC.atomically $ PC.send sendWS pf)
-			(PathFindResponse alts _) <- MaybeT $ fmap (join . fmap hush) $ PC.atomically $ PC.recv recvWS
+			(PathFindResponse alts _) <- MaybeT $ fmap hush $ syncCall ws ((,) pf)
 			return $ map (\(Alternative amnt) -> Alt $ show amnt) alts
 
 		return $ responseTextBuilder (maybe badRequest400 (const ok200) pathfind) headers (viewLiquidityCheck htmlEscape $ Liquidity { alts = alts, pfForm = [renderPathFindForm view] })

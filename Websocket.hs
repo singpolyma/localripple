@@ -1,9 +1,10 @@
-module Websocket (rippleWS, RippleError) where
+module Websocket (rippleWS, RippleError, wsManager, syncCall) where
 
 import Control.Applicative ((<$>))
-import Control.Monad (void, forever, when)
+import Control.Monad (void, when)
 import Control.Monad.Trans (liftIO)
-import System.IO.Error (ioError, userError)
+import Data.Foldable (for_)
+import Control.Concurrent.STM.TMVar (putTMVar, newEmptyTMVar, takeTMVar, TMVar)
 import Control.Proxy.Concurrent (Input, Output, spawn, recv, send, Buffer(Unbounded), forkIO, atomically)
 import qualified Network.WebSockets as WS
 import qualified Data.Text as T
@@ -14,6 +15,35 @@ import qualified Data.Aeson as Aeson
 -- TODO extract error message
 data RippleError = RippleError
 	deriving (Show, Eq)
+
+syncCall :: Input a -> (TMVar r -> a) -> IO r
+syncCall chan msg = do
+	r <- atomically $ newEmptyTMVar
+	void $ atomically $ send chan (msg r)
+	atomically $ takeTMVar r
+
+wsManager :: (Aeson.ToJSON i, Aeson.FromJSON o) =>
+	String -> Int -> String -> IO (Input (i, TMVar (Either RippleError o)))
+wsManager host port path = do
+	(msgIn, msgOut) <- spawn Unbounded
+	void $ forkIO (rippleWS host port path >>= next msgOut)
+	return msgIn
+	where
+	next chan (input, output) = atomically (recv chan) >>= flip for_ (go chan input output)
+
+	go chan input output (i, r) = do
+		sent <- atomically $ send input i
+		if sent then do
+			-- Sent worked, fork recieve thread
+			void $ forkIO $ atomically $
+				-- If connection drops between send and receive, we return error
+				maybe (putTMVar r (Left RippleError)) (putTMVar r) =<< recv output
+			next chan (input, output)
+			else do
+				-- Reconnect on send failure
+				(input', output') <- rippleWS host port path
+				-- Resend, since send failed
+				go chan (input' `asTypeOf` input) (output' `asTypeOf` output) (i, r)
 
 newtype Result a = Result (Either RippleError a)
 
