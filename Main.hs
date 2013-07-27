@@ -1,7 +1,6 @@
 module Main (main) where
 
 import Prelude hiding (FilePath)
-import Control.Monad (void)
 import System.Environment (getArgs)
 import Network.URI (parseAbsoluteURI, URI(..))
 import Control.Error (errLn, headMay)
