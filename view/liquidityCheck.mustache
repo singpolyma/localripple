@@ -28,13 +28,13 @@
 			{{/from}}
 
 			<form method="get" action="">
-				<label for="from">From:</label>
+				<label for="from">From address:</label>
 				<input type="text" id="from" name="from" value="{{from}}" />
 				{{#fromErr}}
 					<span class="error">{{errorMessage}}</span>
 				{{/fromErr}}
 
-				<label for="to">To:</label>
+				<label for="to">To address:</label>
 				<input type="text" id="to" name="to" value="{{to}}" />
 				{{#toErr}}
 					<span class="error">{{errorMessage}}</span>
