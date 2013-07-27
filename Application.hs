@@ -1,15 +1,17 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 {-# LANGUAGE CPP #-}
-module Application where
+module Application (liquidityCheck) where
 
 import Prelude (show)
 import BasicPrelude hiding (show)
+import Control.Applicative (many)
 import Network.Wai (Request(..), Response(..), Application)
-import Network.HTTP.Types (ok200, badRequest400, Status, ResponseHeaders)
+import Network.HTTP.Types (ok200, badRequest400, Status, ResponseHeaders, Query)
 import Network.Wai.Util (stringHeaders)
-import Data.Base58Address (RippleAddress)
-import Control.Error (readMay, note, hush, assertZ)
+import Control.Error (hush, assertZ, MaybeT(..), maybeT, hoistMaybe)
 import Network.URI (URI(..))
+import Text.Digestive
+import qualified Data.Attoparsec.Text as Attoparsec
 import qualified Blaze.ByteString.Builder.Char.Utf8 as Blaze
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
@@ -35,82 +37,77 @@ htmlEscape = concatMap escChar
 responseTextBuilder :: Status -> ResponseHeaders -> TL.Builder -> Response
 responseTextBuilder s h = ResponseBuilder s h . Blaze.fromLazyText . TL.toLazyText
 
-requiredParam :: (Eq k) => e -> (v -> Maybe v) -> (v -> Either e a) -> k -> [(k, v)] -> Either e a
-requiredParam notPresent maybePresent parser k =
-	parser <=< note notPresent . (maybePresent <=< lookup k)
+currencyForm :: (Monad m) => Form String m Currency
+currencyForm = Currency <$>
+	T.pack "currency" .: validate threeLetterCode (string Nothing) <*>
+	T.pack "to" .: stringRead "invalid Ripple address" Nothing
+	where
+	threeLetterCode [a,b,c] = Success (a,b,c)
+	threeLetterCode _ = Error "invalid currency code"
 
-optionalParam :: (Eq k) => (v -> Maybe v) -> (v -> Either e a) -> k -> [(k, v)] -> Maybe a
-optionalParam maybePresent parser k =
-	hush . parser <=< maybePresent <=< lookup k
+amountForm :: (Monad m) => Form String m Amount
+amountForm = Amount <$>
+	fmap fromDbl (T.pack "amount" .: stringRead "invalid amount" Nothing) <*>
+	currencyForm
+	where
+	fromDbl = realToFrac :: Double -> Rational
 
-blankNotPresent :: (Eq m, Monoid m) => m -> Maybe m
-blankNotPresent t
-	| mempty == t = Nothing
-	| otherwise = Just t
+pathFindForm :: (Monad m) => Form String m PathFindRequest
+pathFindForm = PathFindRequest <$>
+	T.pack "from" .: stringRead "invalid Ripple address" Nothing <*>
+	T.pack "to" .: stringRead "invalid Ripple address" Nothing <*>
+	amountForm
 
-nothingNotPresent :: Maybe v -> Maybe (Maybe v)
-nothingNotPresent Nothing = Nothing
-nothingNotPresent x = Just x
+queryKeyParse :: Attoparsec.Parser [T.Text]
+queryKeyParse = do
+	top <- Attoparsec.takeTill (=='[')
+	keys <- many key
+	return (top:keys)
+	where
+	key =
+		Attoparsec.many1 (Attoparsec.char '[') *>
+		Attoparsec.takeTill (==']')
+		<* Attoparsec.many1 (Attoparsec.char ']')
 
-readUtf8BS :: (Read a) => ByteString -> Maybe a
-readUtf8BS = readMay . T.unpack <=< (hush . T.decodeUtf8')
+queryFormEnv :: (Monad m) => Query -> Env m
+queryFormEnv qs pth = return $ map (TextInput . snd) $ filter ((==pth).fst) qs'
+	where
+	qs' = mapMaybe (\(k,v) -> case (
+			hush (T.decodeUtf8' k) >>= hush . Attoparsec.parseOnly queryKeyParse,
+			fmap T.decodeUtf8' v
+		) of
+			(Just k', Just (Right v')) -> Just (k', v')
+			(Just k', Nothing) -> Just (k', T.empty)
+			_ -> Nothing
+		) qs
 
-assertV :: (MonadPlus m) => (v -> Bool) -> v -> m v
-assertV p v = do
-	assertZ (p v)
-	return v
+renderPathFindForm :: View String -> PathFindForm
+renderPathFindForm view = PathFindForm {
+		from = fieldInputText (T.pack "from") view,
+		fromErr = map ErrorMessage $ errors (T.pack "from") view,
+		to = fieldInputText (T.pack "to") view,
+		toErr = map ErrorMessage $ errors (T.pack "to") view,
+		amount = fieldInputText (T.pack "amount") view,
+		amountErr = map ErrorMessage $ errors (T.pack "amount") view,
+		currency = fieldInputText (T.pack "currency") view,
+		currencyErr = map ErrorMessage $ errors (T.pack "currency") view
+	}
 
 liquidityCheck :: URI -> (PC.Input PathFindRequest, PC.Output (Either RippleError PathFindResponse)) -> Application
 liquidityCheck _ (sendWS, recvWS) req
-	| null (queryString req) =
-		return $ responseTextBuilder ok200 headers (viewLiquidityCheck htmlEscape $ Liquidity { err = "", from = "", to = "", alts = [] })
-	| otherwise =
-		-- TODO: this error checking is the worst
-		-- Also, websocket reconnect logic
-		case pathfind of
-			Left e ->
-				return $ responseTextBuilder badRequest400 headers (viewLiquidityCheck htmlEscape $ Liquidity { err = e, from = "", to = "", alts = [] })
-			Right pf -> do
-				worked <- liftIO $ PC.atomically $ PC.send sendWS pf
-				if (not worked) then
-					return $ responseTextBuilder badRequest400 headers (viewLiquidityCheck htmlEscape $ Liquidity { err = "Websocket is down", from = "", to = "", alts = [] })
-					else do
-						resp <- liftIO $ PC.atomically $ PC.recv recvWS
-						case resp of
-							Just (Right (PathFindResponse alts _)) -> do
-								let Right f = from
-								let Right t = to
-								return $ responseTextBuilder ok200 headers (viewLiquidityCheck htmlEscape $ Liquidity { err = "", alts = map (\(Alternative amnt) -> Alt (show amnt)) alts, from = show f, to = show t})
-							Just (Left _) ->
-								return $ responseTextBuilder badRequest400 headers (viewLiquidityCheck htmlEscape $ Liquidity { err = "Ripple request error", from = "", to = "", alts = [] })
-							Nothing ->
-								return $ responseTextBuilder badRequest400 headers (viewLiquidityCheck htmlEscape $ Liquidity { err = "Websocket is down", from = "", to = "", alts = [] })
+	| null (queryString req) = do
+		form <- getForm T.empty pathFindForm
+		return $ responseTextBuilder ok200 headers (viewLiquidityCheck htmlEscape $ Liquidity { alts = [], pfForm = [renderPathFindForm form] })
+	| otherwise = do
+		-- TODO: websocket reconnect logic
+		(view, pathfind) <- postForm T.empty pathFindForm (\(_:x) -> queryFormEnv (queryString req) x)
+
+		alts <- liftIO $ maybeT (return []) return $ do
+			pf <- hoistMaybe pathfind
+			assertZ =<< liftIO (PC.atomically $ PC.send sendWS pf)
+			(PathFindResponse alts _) <- MaybeT $ fmap (join . fmap hush) $ PC.atomically $ PC.recv recvWS
+			return $ map (\(Alternative amnt) -> Alt $ show amnt) alts
+
+		return $ responseTextBuilder (maybe badRequest400 (const ok200) pathfind) headers (viewLiquidityCheck htmlEscape $ Liquidity { alts = alts, pfForm = [renderPathFindForm view] })
 	where
-	pathfind = PathFindRequest <$> from <*> to <*>
-		(Amount <$> fmap realToFrac amount <*> (Currency <$> currency <*> to))
-
-	from :: Either String RippleAddress
-	from = requiredParam "From address required"
-		(nothingNotPresent <=< fmap blankNotPresent)
-		(note "Invalid from address" . (readUtf8BS =<<))
-		(fromString "from") (queryString req)
-
-	to :: Either String RippleAddress
-	to = requiredParam "To address required"
-		(nothingNotPresent <=< fmap blankNotPresent)
-		(note "Invalid to address" . (readUtf8BS =<<))
-		(fromString "to") (queryString req)
-
-	amount :: Either String Double
-	amount = requiredParam "Amount required"
-		(nothingNotPresent <=< fmap blankNotPresent)
-		(note "Invalid amount" . (readUtf8BS =<<))
-		(fromString "amount") (queryString req)
-
-	currency :: Either String (Char,Char,Char)
-	currency = fmap (\[a,b,c] -> (a,b,c)) $ requiredParam "Currency required"
-		(nothingNotPresent <=< fmap blankNotPresent)
-		(note "Invalid currency" . (assertV (\x -> length x == 3) <=< ((fmap T.unpack . hush . T.decodeUtf8') =<<)))
-		(fromString "currency") (queryString req)
-
 	Just headers = stringHeaders [("Content-Type", "text/html; charset=utf8")]
