@@ -58,16 +58,13 @@ pathFindForm = PathFindRequest <$>
 	T.pack "to" .: stringRead "invalid Ripple address" Nothing <*>
 	amountForm
 
+-- | Mimick PHP's query parser
+-- Any malformed bit terminates the parser, but does not cause it to fail
+-- For a stricter parse, use '(queryKeyParse <* endOfInput)'
 queryKeyParse :: Attoparsec.Parser [T.Text]
-queryKeyParse = do
-	top <- Attoparsec.takeTill (=='[')
-	keys <- many key
-	return (top:keys)
+queryKeyParse = (:) <$> Attoparsec.takeTill (=='[') <*> many k
 	where
-	key =
-		Attoparsec.many1 (Attoparsec.char '[') *>
-		Attoparsec.takeTill (==']')
-		<* Attoparsec.many1 (Attoparsec.char ']')
+	k = Attoparsec.char '[' *> Attoparsec.takeTill (==']') <* Attoparsec.char ']'
 
 queryFormEnv :: (Monad m) => Query -> Env m
 queryFormEnv qs pth = return $ map (TextInput . snd) $ filter ((==pth).fst) qs'
