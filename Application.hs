@@ -8,7 +8,7 @@ import Network.Wai (Request(..), Response(..), Application)
 import Network.HTTP.Types (ok200, badRequest400, Status, ResponseHeaders, Query)
 import Network.Wai.Util (stringHeaders)
 import Control.Concurrent.STM.TMVar (TMVar)
-import Control.Error (hush, MaybeT(..), maybeT, hoistMaybe)
+import Control.Error (hush, MaybeT(..))
 import Network.URI (URI(..))
 import Text.Digestive
 import qualified Data.Attoparsec.Text as Attoparsec
@@ -24,6 +24,12 @@ import PathFind
 import Amount
 import Websocket
 #include "PathHelpers.hs"
+
+maybeT :: Monad m => m b -> (a -> m b) -> MaybeT m a -> m b
+maybeT mb kb (MaybeT ma) = ma >>= maybe mb kb
+
+hoistMaybe :: (Monad m) => Maybe b -> MaybeT m b
+hoistMaybe = MaybeT . return
 
 htmlEscape :: String -> String
 htmlEscape = concatMap escChar

@@ -1,7 +1,6 @@
 module PathFind where
 
 import Control.Applicative hiding (Alternative)
-import Control.Error (readZ)
 
 import Data.Base58Address (RippleAddress)
 import qualified Data.Text as T

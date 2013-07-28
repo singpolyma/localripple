@@ -7,7 +7,7 @@ import Data.Word
 import Data.Binary (Binary(..), Get, putWord8)
 import Data.Binary.Get (getLazyByteString)
 import Data.Base58Address (RippleAddress)
-import Control.Error (readZ)
+import Control.Error (readMay)
 import qualified Data.ByteString.Lazy as LZ
 import qualified Data.Text as T
 
@@ -15,6 +15,9 @@ import Data.Aeson ((.=), (.:))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
 import qualified Data.Attoparsec.Number as Aeson
+
+readZ :: (MonadPlus m) => (Read a) => String -> m a
+readZ = maybe mzero return . readMay
 
 data Currency = XRP | Currency (Char,Char,Char) RippleAddress
 	deriving (Eq)
