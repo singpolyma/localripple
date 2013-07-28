@@ -66,17 +66,13 @@ queryKeyParse = (:) <$> Attoparsec.takeTill (=='[') <*> many k
 	where
 	k = Attoparsec.char '[' *> Attoparsec.takeTill (==']') <* Attoparsec.char ']'
 
+-- Manual currying for performance (tested with profiler)
 queryFormEnv :: (Monad m) => Query -> Env m
-queryFormEnv qs pth = return $ map (TextInput . snd) $ filter ((==pth).fst) qs'
+queryFormEnv qs = \pth -> return $! map snd $ filter ((==pth).fst) qs'
 	where
-	qs' = mapMaybe (\(k,v) -> case (
-			hush (T.decodeUtf8' k) >>= hush . Attoparsec.parseOnly queryKeyParse,
-			fmap T.decodeUtf8' v
-		) of
-			(Just k', Just (Right v')) -> Just (k', v')
-			(Just k', Nothing) -> Just (k', T.empty)
-			_ -> Nothing
-		) qs
+	qs' = flip mapMaybe qs $ \(k, v) -> do
+		k' <- hush (T.decodeUtf8' k) >>= hush . Attoparsec.parseOnly queryKeyParse
+		return (k', TextInput $ fromMaybe T.empty (v >>= hush . T.decodeUtf8'))
 
 renderPathFindForm :: View String -> PathFindForm
 renderPathFindForm view = PathFindForm {
