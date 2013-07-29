@@ -66,17 +66,13 @@ wsReceiveJSON = do
 
 rippleWS' :: (Aeson.ToJSON i, Aeson.FromJSON o) => Output i -> Input (Either RippleError o) -> WS.WebSockets WS.Hybi10 ()
 rippleWS' inputOut outputIn = do
-	sink <- WS.getSink
-	liftIO $ void $ forkIO $ sendLoop sink
+	WS.getSink >>= liftIO . void . forkIO . sendLoop
 	receiveLoop
 	where
-	sendLoop sink = do
-		i <- atomically (recv inputOut)
-		case i of
-			Just x -> do
-				WS.sendSink sink $ WS.textData $ Aeson.encode x
-				sendLoop sink
-			Nothing -> return ()
+	sendLoop sink = atomically (recv inputOut) >>= flip for_ (\x -> do
+			WS.sendSink sink $ WS.textData $ Aeson.encode x
+			sendLoop sink
+		)
 
 	receiveLoop = do
 		result <- wsReceiveJSON >>= liftIO . atomically . send outputIn
