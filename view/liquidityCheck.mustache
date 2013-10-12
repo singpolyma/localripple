@@ -10,51 +10,25 @@
 	<body>
 		<h1><a href="//rippleunion.com"><img src="/assets/logo.png" alt="Ripple Union" /></a> Liquidity Check</h1>
 
-		{{#pfForm}}
-			{{#from}}
-				<section>
-					<h1>Liquidity options from {{from}} to {{to}}:</h1>
+		{{#result}}
+			<section>
+				<h1>Liquidity options from {{from}} to {{to}}:</h1>
 
-					<ul>
-					{{#alts}}
-						<li>{{alt}}</li>
-					{{/alts}}
-					</ul>
+				<ul>
+				{{#alts}}
+					<li>{{alt}}</li>
+				{{/alts}}
+				</ul>
 
-					{{^alts}}
-						No liquidity found.
-					{{/alts}}
-				</section>
-			{{/from}}
+				{{^alts}}
+					No liquidity found.
+				{{/alts}}
+			</section>
+		{{/result}}
 
-			<form method="get" action="">
-				<label for="from">From address:</label>
-				<input type="text" id="from" name="from" value="{{from}}" />
-				{{#fromErr}}
-					<span class="error">{{errorMessage}}</span>
-				{{/fromErr}}
-
-				<label for="to">To address:</label>
-				<input type="text" id="to" name="to" value="{{to}}" />
-				{{#toErr}}
-					<span class="error">{{errorMessage}}</span>
-				{{/toErr}}
-
-				<label for="amount">Amount:</label>
-				<input type="number" id="amount" name="amount" value="{{amount}}" />
-				{{#amountErr}}
-					<span class="error">{{errorMessage}}</span>
-				{{/amountErr}}
-
-				<label for="currency">Currency:</label>
-				<input type="text" id="currency" name="currency" value="{{currency}}" />
-				{{#currencyErr}}
-					<span class="error">{{errorMessage}}</span>
-				{{/currencyErr}}
-
-				<input type="submit" value="Check" />
-			</form>
-
-		{{/pfForm}}
+		<form method="get" action="">
+			{{{pfForm}}}
+			<button type="submit">Check</button>
+		</form>
 	</body>
 </html>

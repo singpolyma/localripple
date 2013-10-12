@@ -1,25 +1,26 @@
 module Records where
 
-import Data.Text (Text)
+import Data.Text.Buildable
+import Text.Blaze.Html (Html)
+import Text.Blaze.Internal (MarkupM)
+import Text.Blaze.Html.Renderer.Text (renderHtmlBuilder)
+
+instance Buildable (MarkupM a) where
+	build = renderHtmlBuilder . fmap (const ())
 
 data Liquidity = Liquidity {
-		alts :: [Alt],
-		pfForm :: [PathFindForm]
+		result :: [Result],
+		pfForm :: Html
+	}
+
+data Result = Result {
+		from :: String,
+		to :: String,
+		alts :: [Alt]
 	}
 
 data Alt = Alt {
 		alt :: String
-	} deriving (Eq)
-
-data PathFindForm = PathFindForm {
-		from :: Text,
-		fromErr :: [ErrorMessage],
-		to :: Text,
-		toErr :: [ErrorMessage],
-		amount :: Text,
-		amountErr :: [ErrorMessage],
-		currency :: Text,
-		currencyErr :: [ErrorMessage]
 	} deriving (Eq)
 
 data ErrorMessage = ErrorMessage {
