@@ -2,10 +2,10 @@ module Websocket (rippleWS, RippleError, wsManager, syncCall) where
 
 import Control.Applicative ((<$>))
 import Control.Monad (void, when)
-import Control.Monad.Trans (liftIO)
+import Control.Monad.IO.Class (liftIO)
 import Data.Foldable (for_)
 import Control.Concurrent.STM.TMVar (putTMVar, newEmptyTMVar, takeTMVar, TMVar)
-import Control.Proxy.Concurrent (Input, Output, spawn, recv, send, Buffer(Unbounded), forkIO, atomically)
+import Pipes.Concurrent (Input, Output, spawn, recv, send, Buffer(Unbounded), forkIO, atomically)
 import qualified Network.WebSockets as WS
 import qualified Data.Text as T
 
@@ -16,14 +16,14 @@ import qualified Data.Aeson as Aeson
 data RippleError = RippleError
 	deriving (Show, Eq)
 
-syncCall :: Input a -> (TMVar r -> a) -> IO r
+syncCall :: Output a -> (TMVar r -> a) -> IO r
 syncCall chan msg = do
 	r <- atomically $ newEmptyTMVar
 	void $ atomically $ send chan (msg r)
 	atomically $ takeTMVar r
 
 wsManager :: (Aeson.ToJSON i, Aeson.FromJSON o) =>
-	String -> Int -> String -> IO (Input (i, TMVar (Either RippleError o)))
+	String -> Int -> String -> IO (Output (i, TMVar (Either RippleError o)))
 wsManager host port path = do
 	(msgIn, msgOut) <- spawn Unbounded
 	void $ forkIO (rippleWS host port path >>= next msgOut)
@@ -64,7 +64,7 @@ wsReceiveJSON = do
 		Just (Result v) -> return v
 		Nothing -> return (Left RippleError)
 
-rippleWS' :: (Aeson.ToJSON i, Aeson.FromJSON o) => Output i -> Input (Either RippleError o) -> WS.WebSockets WS.Hybi10 ()
+rippleWS' :: (Aeson.ToJSON i, Aeson.FromJSON o) => Input i -> Output (Either RippleError o) -> WS.WebSockets WS.Hybi10 ()
 rippleWS' inputOut outputIn = do
 	WS.getSink >>= liftIO . void . forkIO . sendLoop
 	receiveLoop
@@ -79,7 +79,7 @@ rippleWS' inputOut outputIn = do
 		when result receiveLoop
 
 -- | If the connection terminates, the mailboxes will start to error on use
-rippleWS :: (Aeson.ToJSON i, Aeson.FromJSON o) => String -> Int -> String -> IO (Input i, Output (Either RippleError o))
+rippleWS :: (Aeson.ToJSON i, Aeson.FromJSON o) => String -> Int -> String -> IO (Output i, Input (Either RippleError o))
 rippleWS host port path = do
 	(inputIn, inputOut) <- spawn Unbounded
 	(outputIn, outputOut) <- spawn Unbounded

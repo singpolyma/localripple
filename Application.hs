@@ -16,7 +16,7 @@ import qualified Blaze.ByteString.Builder.Char.Utf8 as Blaze
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.Lazy.Builder as TL
-import qualified Control.Proxy.Concurrent as PC
+import qualified Pipes.Concurrent as PC
 
 import Records
 import MustacheTemplates
@@ -92,7 +92,7 @@ renderPathFindForm view = PathFindForm {
 		currencyErr = map ErrorMessage $ errors (T.pack "currency") view
 	}
 
-liquidityCheck :: URI -> (PC.Input (PathFindRequest, TMVar (Either RippleError PathFindResponse))) -> Application
+liquidityCheck :: URI -> (PC.Output (PathFindRequest, TMVar (Either RippleError PathFindResponse))) -> Application
 liquidityCheck _ ws req
 	| null (queryString req) = do
 		form <- getForm T.empty pathFindForm

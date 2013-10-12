@@ -5,7 +5,7 @@ import System.Environment (getArgs)
 import Network.URI (parseAbsoluteURI, URI(..))
 import Control.Error (headMay)
 import System.IO (hPutStrLn, stderr)
-import Filesystem.Path.CurrentOS (encodeString)
+import Filesystem.Path.CurrentOS (FilePath)
 import Filesystem (getWorkingDirectory)
 
 import Network.Wai (Application)
@@ -14,7 +14,7 @@ import Network.Wai.Middleware.RequestLogger (logStdoutDev)
 import Network.Wai.Middleware.Autohead (autohead)
 import Network.Wai.Middleware.Jsonp (jsonp)
 import Network.Wai.Middleware.AcceptOverride (acceptOverride)
-import Network.Wai.Application.Static (staticApp, defaultWebAppSettings, ssFolder, fileSystemLookup, toFilePath)
+import Network.Wai.Application.Static (staticApp, defaultWebAppSettings)
 
 import Network.Wai.Dispatch
 import Routes
@@ -29,8 +29,8 @@ addTrailingSlash u@(URI {uriPath = p})
 	| last p == '/' = u
 	| otherwise = u {uriPath = p ++ "/"}
 
-staticRoot :: String -> Application
-staticRoot pth = staticApp (defaultWebAppSettings {ssFolder = fileSystemLookup $ toFilePath pth})
+staticRoot :: FilePath -> Application
+staticRoot = staticApp . defaultWebAppSettings
 
 main :: IO ()
 main = do
@@ -39,7 +39,7 @@ main = do
 	main' root args
 	where
 	main' (Just root@(URI {uriAuthority = Just _})) (_:port:_) = do
-		cwd <- fmap encodeString getWorkingDirectory
+		cwd <- getWorkingDirectory
 		ws <- wsManager "s1.ripple.com" 443 "/"
 		run (read port) $
 			logStdoutDev $ autohead $ acceptOverride $ jsonp $ -- Middleware
