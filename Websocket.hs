@@ -2,11 +2,10 @@ module Websocket (rippleWS, RippleError, wsManager, syncCall) where
 
 import Control.Applicative ((<$>))
 import Control.Monad (void, when)
-import Control.Monad.IO.Class (liftIO)
 import Data.Foldable (traverse_)
 import Control.Exception (finally)
 import Control.Concurrent.STM.TMVar (putTMVar, newEmptyTMVar, takeTMVar, TMVar)
-import Pipes.Concurrent (Input, Output, spawn, spawn', recv, send, Buffer(Unbounded), forkIO, atomically)
+import Pipes.Concurrent (Input, Output, spawn, spawn', recv, send, Buffer(Unbounded, Single), forkIO, atomically)
 import qualified Network.WebSockets as WS
 import qualified Data.Text as T
 
@@ -23,11 +22,13 @@ syncCall chan msg = do
 	void $ atomically $ send chan (msg r)
 	atomically $ takeTMVar r
 
+-- Spawn rippleWS with Single so that we can only lose one send item
+-- Which we account for as a connection failure between send and receive
 wsManager :: (Aeson.ToJSON i, Aeson.FromJSON o) =>
 	String -> Int -> String -> IO (Output (i, TMVar (Either RippleError o)))
 wsManager host port path = do
 	(msgIn, msgOut) <- spawn Unbounded
-	void $ forkIO (rippleWS host port path >>= next msgOut)
+	void $ forkIO (rippleWS host port path Single Unbounded >>= next msgOut)
 	return msgIn
 	where
 	next chan (input, output) = atomically (recv chan) >>= traverse_ (go chan input output)
@@ -35,14 +36,14 @@ wsManager host port path = do
 	go chan input output (i, r) = do
 		sent <- atomically $ send input i
 		if sent then do
-			-- Sent worked, fork recieve thread
-			void $ forkIO $ atomically $
+			-- Send worked, fork recieve thread
+			void $ forkIO $ atomically $ recv output >>=
 				-- If connection drops between send and receive, we return error
-				maybe (putTMVar r (Left RippleError)) (putTMVar r) =<< recv output
+				maybe (putTMVar r (Left RippleError)) (putTMVar r)
 			next chan (input, output)
 			else do
 				-- Reconnect on send failure
-				(input', output') <- rippleWS host port path
+				(input', output') <- rippleWS host port path Single Unbounded
 				-- Resend, since send failed
 				go chan (input' `asTypeOf` input) (output' `asTypeOf` output) (i, r)
 
@@ -87,9 +88,9 @@ rippleWS' inputOut outputIn sealInput connection = do
 		when result receiveLoop -- Loop until send fails
 
 -- | If the connection terminates, the mailboxes will start to error on use
-rippleWS :: (Aeson.ToJSON i, Aeson.FromJSON o) => String -> Int -> String -> IO (Output i, Input (Either RippleError o))
-rippleWS host port path = do
-	(inputIn, inputOut, inputSeal) <- spawn' Unbounded
-	(outputIn, outputOut) <- spawn Unbounded
+rippleWS :: (Aeson.ToJSON i, Aeson.FromJSON o) => String -> Int -> String -> Buffer i -> Buffer (Either RippleError o) -> IO (Output i, Input (Either RippleError o))
+rippleWS host port path bufferIn bufferOut = do
+	(inputIn, inputOut, inputSeal) <- spawn' bufferIn
+	(outputIn, outputOut) <- spawn bufferOut
 	void $ forkIO $ WS.runClient host port path (rippleWS' inputOut outputIn (atomically inputSeal))
 	return (inputIn, outputOut)
