@@ -3,9 +3,10 @@ module Websocket (rippleWS, RippleError, wsManager, syncCall) where
 import Control.Applicative ((<$>))
 import Control.Monad (void, when)
 import Control.Monad.IO.Class (liftIO)
-import Data.Foldable (for_)
+import Data.Foldable (traverse_)
+import Control.Exception (finally)
 import Control.Concurrent.STM.TMVar (putTMVar, newEmptyTMVar, takeTMVar, TMVar)
-import Pipes.Concurrent (Input, Output, spawn, recv, send, Buffer(Unbounded), forkIO, atomically)
+import Pipes.Concurrent (Input, Output, spawn, spawn', recv, send, Buffer(Unbounded), forkIO, atomically)
 import qualified Network.WebSockets as WS
 import qualified Data.Text as T
 
@@ -29,7 +30,7 @@ wsManager host port path = do
 	void $ forkIO (rippleWS host port path >>= next msgOut)
 	return msgIn
 	where
-	next chan (input, output) = atomically (recv chan) >>= flip for_ (go chan input output)
+	next chan (input, output) = atomically (recv chan) >>= traverse_ (go chan input output)
 
 	go chan input output (i, r) = do
 		sent <- atomically $ send input i
@@ -57,31 +58,38 @@ instance (Aeson.FromJSON a) => Aeson.FromJSON (Result a) where
 			_ -> fail "Invalid Ripple Result"
 	parseJSON _ = fail "Ripple Result is alsways a JSON object"
 
-wsReceiveJSON :: (WS.TextProtocol p, Aeson.FromJSON j) => WS.WebSockets p (Either RippleError j)
-wsReceiveJSON = do
-	x <- WS.receiveData
-	case Aeson.decode x of
-		Just (Result v) -> return v
-		Nothing -> return (Left RippleError)
+unResult :: Maybe (Result a) -> Either RippleError a
+unResult (Just (Result x)) = x
+unResult _ = Left RippleError
 
-rippleWS' :: (Aeson.ToJSON i, Aeson.FromJSON o) => Input i -> Output (Either RippleError o) -> WS.WebSockets WS.Hybi10 ()
-rippleWS' inputOut outputIn = do
-	WS.getSink >>= liftIO . void . forkIO . sendLoop
-	receiveLoop
+wsReceiveJSON :: (Aeson.FromJSON j) => WS.Connection -> IO (Maybe j)
+wsReceiveJSON = fmap Aeson.decode . WS.receiveData
+
+wsSendJSON :: (Aeson.ToJSON j) => WS.Connection -> j -> IO ()
+wsSendJSON conn = WS.sendTextData conn . Aeson.encode
+
+-- On any exception, we stop accepting new messages
+-- We stop and the connection is closed if no one is listening anymore
+rippleWS' :: (Aeson.ToJSON i, Aeson.FromJSON o) => Input i -> Output (Either RippleError o) -> IO () -> WS.Connection -> IO ()
+rippleWS' inputOut outputIn sealInput connection = do
+	-- Stop accepting input if connection fails
+	void $ forkIO (sendLoop `finally` sealInput)
+	receiveLoop `finally` sealInput
 	where
-	sendLoop sink = atomically (recv inputOut) >>= flip for_ (\x -> do
-			WS.sendSink sink $ WS.textData $ Aeson.encode x
-			sendLoop sink
+	sendLoop = atomically (recv inputOut) >>= traverse_ (\x -> do
+			wsSendJSON connection x
+			sendLoop -- Loop until recv fails
 		)
 
 	receiveLoop = do
-		result <- wsReceiveJSON >>= liftIO . atomically . send outputIn
-		when result receiveLoop
+		msg <- wsReceiveJSON connection
+		result <- atomically $ send outputIn $ unResult msg
+		when result receiveLoop -- Loop until send fails
 
 -- | If the connection terminates, the mailboxes will start to error on use
 rippleWS :: (Aeson.ToJSON i, Aeson.FromJSON o) => String -> Int -> String -> IO (Output i, Input (Either RippleError o))
 rippleWS host port path = do
-	(inputIn, inputOut) <- spawn Unbounded
+	(inputIn, inputOut, inputSeal) <- spawn' Unbounded
 	(outputIn, outputOut) <- spawn Unbounded
-	void $ forkIO $ WS.connect host port path (rippleWS' inputOut outputIn)
+	void $ forkIO $ WS.runClient host port path (rippleWS' inputOut outputIn (atomically inputSeal))
 	return (inputIn, outputOut)
