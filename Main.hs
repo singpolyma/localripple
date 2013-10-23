@@ -40,7 +40,7 @@ main = do
 	where
 	main' (Just root@(URI {uriAuthority = Just _})) (_:port:_) = do
 		cwd <- getWorkingDirectory
-		ws <- wsManager "s1.ripple.com" 443 "/"
+		ws <- wsManager "s1.riplsec.com" 443 "/"
 		run (read port) $
 			logStdoutDev $ autohead $ acceptOverride $ jsonp $ -- Middleware
 			dispatch (staticRoot cwd) $ routes root ws         -- Do routing

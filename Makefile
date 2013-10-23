@@ -1,5 +1,5 @@
 Main: Main.hs Application.hs Routes.hs MustacheTemplates.hs PathHelpers.hs Amount.hs PathFind.hs Websocket.hs
-	ghc -O2 -Wall -fno-warn-name-shadowing Main.hs
+	ghc -threaded -O2 -Wall -fno-warn-name-shadowing Main.hs
 
 Routes.hs: routes
 	routeGenerator -r -m Application -n 2 $< > $@
