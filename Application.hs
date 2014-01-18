@@ -87,4 +87,4 @@ liquidityCheck _ ws req
 
 		textBuilder (maybe badRequest400 (const ok200) pathfind) headers (viewLiquidityCheck htmlEscape $ Liquidity { result = result', pfForm = form })
 	where
-	Just headers = stringHeaders [("Content-Type", "text/html; charset=utf8")]
+	Just headers = stringHeaders [("Content-Type", "text/html; charset=utf-8")]
